@@ -1,0 +1,67 @@
+# Build directories
+build/
+cmake-build-*/
+
+# Compiled Object files
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Log files
+logs/
+*.log
+
+# Database files
+data/
+*.db
+*.sqlite
+
+# Environment files
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Mac specific
+.DS_Store
+
+# Configuration files with sensitive data
+config/config.json
+!config/config.json.example
+
+# Web assets
+web/static/node_modules/
+web/static/dist/
+
+# Benchmark results
+benchmarks/
+*.benchmark
+
+# Core dumps
+core.*
+
+# Backup files
+*.bak
+*.backup
+
+# Task master files
+.taskmaster/ 

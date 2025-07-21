@@ -1,0 +1,163 @@
+# Crypto Trading Bot – MVP Product Requirements Document (PRD)
+
+**Version 0.1 – 15 Jul 2025**
+
+---
+
+## 1. Purpose
+
+Deliver a minimum viable crypto trading bot written in **C++**, running on a **cloud server**, with support for live market data ingestion, execution of a basic trading strategy (momentum or mean reversion), integrated **risk management**, and **order execution** via a performant exchange API. The bot should also include a **web-based interface** for monitoring and control, and a **separate backtesting module**. It aims to demonstrate low-latency systems programming and extensibility into ML-enhanced trading.
+
+## 2. Goals & Success Metrics
+
+| Goal               | Metric                                       |
+| ------------------ | -------------------------------------------- |
+| Low Latency        | Order dispatch latency <10ms from signal     |
+| Reliable Ingestion | Continuous live data from exchange for 24h+  |
+| Web Visibility     | Real-time status via web dashboard           |
+| Modular Design     | Add/remove strategies without system restart |
+
+> **Success**: Bot runs on cloud, executes trades based on live crypto data, and logs P\&L with live performance view.
+
+## 3. Target Users
+
+Developers and quantitative trading enthusiasts seeking to test or deploy high-performance automated strategies on cryptocurrency markets using C++.
+
+## 4. Scope
+
+### In‑Scope (MVP)
+
+* **Live Market Data Ingestion** via WebSocket (e.g. Binance).
+* **SQLite** logging of trades and historical prices.
+* **Momentum or Mean Reversion Strategy** with plug-in architecture.
+* **Risk Management Module** (position limits, stop-loss, take-profit).
+* **Order Execution Module** using REST API.
+* **Latency Profiling** with Google Benchmark.
+* **Web Interface** for status display and basic control.
+* **Backtest Module** separated from live components.
+
+### Out‑of‑Scope (Deferred)
+
+* Multi-asset or multi-exchange support.
+* FIX protocol integration.
+* Auto-ML signal generation.
+* Cross-platform desktop GUI.
+
+## 5. User Stories
+
+| ID   | Story                                                                    | Priority |
+| ---- | ------------------------------------------------------------------------ | -------- |
+| US‑1 | *As a trader, I want the bot to place real trades based on signals.*     | P0       |
+| US‑2 | *As a developer, I want to view trade status and performance live.*      | P0       |
+| US‑3 | *As a researcher, I want to test strategies offline on historical data.* | P0       |
+| US‑4 | *As a user, I want risk limits to be enforced to avoid overexposure.*    | P0       |
+
+## 6. Functional Requirements
+
+| ID   | Requirement                                         | Priority |
+| ---- | --------------------------------------------------- | -------- |
+| FR‑1 | Connect to exchange via WebSocket for data.         | P0       |
+| FR‑2 | Parse and store market data to in-memory & SQLite   | P0       |
+| FR‑3 | Implement pluggable trading strategies.             | P0       |
+| FR‑4 | Enforce stop-loss, take-profit, and position limits | P0       |
+| FR‑5 | Place market/limit orders via REST API.             | P0       |
+| FR‑6 | Build basic web dashboard (positions, P\&L, logs).  | P0       |
+| FR‑7 | Integrate Google Benchmark for tick/latency stats   | P0       |
+| FR‑8 | Backtesting engine uses stored data & strategy.     | P0       |
+
+## 7. Non‑Functional Requirements
+
+| Category        | Requirement                                    |
+| --------------- | ---------------------------------------------- |
+| Performance     | Tick-to-trade <10ms on single-thread CPU       |
+| Security        | API keys stored encrypted; no external logging |
+| Compatibility   | Linux server, tested on Ubuntu 22.04           |
+| Maintainability | Modular architecture, config-driven strategies |
+| Monitoring      | Web interface shows live logs and order status |
+
+## 8. Technical Architecture
+
+```
+[Web UI] ←HTTP/WS→ [C++ Core Engine] ←→ [Exchange API]
+                     │
+                     ├── [Strategy Module]
+                     ├── [Risk Manager]
+                     ├── [Order Execution (REST)]
+                     ├── [SQLite DB + Logger]
+                     └── [Benchmark + Metrics]
+```
+
+* **C++ Core**: Boost.Asio, Boost.Beast, STL, Google Benchmark
+* **Data Store**: SQLite (via SQLiteCpp or native API)
+* **Web Interface**: C++ (Beast) or Node.js + WebSocket bridge
+* **ML Module (optional)**: TensorFlow C++ inference integration
+
+## 9. Data Model
+
+`TradeLog`
+
+| Field     | Type     | Description                  |
+| --------- | -------- | ---------------------------- |
+| id        | int (PK) | Auto increment               |
+| timestamp | datetime | Trade time                   |
+| symbol    | string   | Asset symbol (e.g., BTCUSDT) |
+| side      | string   | Buy/Sell                     |
+| price     | float    | Executed price               |
+| quantity  | float    | Executed quantity            |
+| pnl       | float    | Profit/Loss                  |
+
+## 10. API Contract (Web UI)
+
+| Method | Path       | Description                   | Body           | Response      |
+| ------ | ---------- | ----------------------------- | -------------- | ------------- |
+| GET    | /status    | Current status (uptime, mode) | –              | StatusPayload |
+| GET    | /positions | List current positions        | –              | Position\[]   |
+| GET    | /trades    | Trade history (last N)        | –              | TradeLog\[]   |
+| POST   | /control   | Start/stop bot, switch strat  | ControlPayload | 200 OK        |
+
+## 11. Acceptance Criteria
+
+* Bot connects to exchange and receives live ticks.
+* Strategy runs and generates trades as expected.
+* Risk manager enforces all limits.
+* Orders are placed and confirmed via exchange.
+* Web dashboard reflects live state accurately.
+* Backtest outputs match strategy logic.
+
+## 12. Release Plan
+
+| Phase               | Duration | Deliverables                              |
+| ------------------- | -------- | ----------------------------------------- |
+| Phase 0 – Setup     | 1 wk     | Project structure, CMake, libs integrated |
+| Phase 1 – Core Bot  | 2 wks    | FR‑1 to FR‑5                              |
+| Phase 2 – Web UI    | 1 wk     | FR‑6, live control panel                  |
+| Phase 3 – Backtest  | 1 wk     | FR‑8 complete                             |
+| Phase 4 – Benchmark | 1 wk     | FR‑7 metrics, profiling enabled           |
+
+## 13. Future Features
+
+* Multi-asset and multi-exchange parallel trading.
+* AutoML strategy optimizer.
+* GUI-based strategy builder.
+* Web-auth and remote access hardening.
+
+## 14. Risks & Mitigations
+
+| Risk                        | Impact | Mitigation                              |
+| --------------------------- | ------ | --------------------------------------- |
+| Exchange API instability    | High   | Add reconnection & retry logic          |
+| Data overflow / memory use  | Med    | Apply message throttling & backpressure |
+| TensorFlow integration size | Med    | Keep ML optional and modular            |
+
+## 15. License
+
+This bot is released under **Apache 2.0** for educational and non-commercial use.
+
+## 16. Glossary
+
+* **Tick-to-trade** – Time from data event to order execution.
+* **PnL** – Profit and Loss.
+* **Momentum Strategy** – Follows trends upward/downward.
+* **Mean Reversion** – Bets on prices returning to average.
+
+---
