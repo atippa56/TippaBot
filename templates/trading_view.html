@@ -712,25 +712,70 @@
 
     <script>
         let candlestickChart;
-        let currentPair = 'BTC/USD';
-        let currentPrice = 117913.99;
-        let priceChange = 813.99;
-        let priceChangePercent = 0.70;
+        let currentPair = '';
+        let currentPrice = 0;
+        let priceChange = 0;
+        let priceChangePercent = 0;
+        let symbol = '';
+        let marketData = null;
 
-        // Initialize the trading view
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeChart();
-            updatePriceInfo();
+        // Parse symbol from URL
+        function getSymbolFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('symbol');
+        }
+
+        document.addEventListener('DOMContentLoaded', async function() {
+            symbol = getSymbolFromUrl();
+            if (symbol) {
+                await fetchMarketData(symbol);
+            } else {
+                showDemoData('BTC/USD');
+            }
+            document.getElementById('pair-selector').addEventListener('change', function(e) {
+                // Allow switching pairs manually (demo only)
+                showDemoData(e.target.value);
+            });
             setupEventListeners();
             startPriceUpdates();
         });
 
+        async function fetchMarketData(symbol) {
+            try {
+                const resp = await fetch(`/api/market_data?symbol=${encodeURIComponent(symbol)}`);
+                if (!resp.ok) throw new Error('API error');
+                const data = await resp.json();
+                marketData = data;
+                currentPair = (data.pair || symbol.toUpperCase() + '/USD');
+                currentPrice = data.price;
+                priceChange = data.change_24h;
+                priceChangePercent = data.change_24h;
+                updateUIWithMarketData();
+            } catch (e) {
+                showDemoData(symbol);
+            }
+        }
+
+        function showDemoData(symbol) {
+            // fallback demo data for unknown symbols
+            currentPair = symbol.toUpperCase() + '/USD';
+            currentPrice = 100 + Math.random() * 1000;
+            priceChange = (Math.random() - 0.5) * 10;
+            priceChangePercent = (priceChange / currentPrice) * 100;
+            updateUIWithMarketData();
+        }
+
+        function updateUIWithMarketData() {
+            document.getElementById('pair-name').textContent = currentPair;
+            document.getElementById('pair-selector').value = currentPair;
+            updatePriceInfo();
+            initializeChart();
+        }
+
         function initializeChart() {
             const ctx = document.getElementById('candlestick-chart').getContext('2d');
-            
-            // Generate candlestick data
             const data = generateCandlestickData();
-            
+            if (candlestickChart) candlestickChart.destroy();
             candlestickChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -758,9 +803,7 @@
                         mode: 'index'
                     },
                     plugins: {
-                        legend: {
-                            display: false
-                        },
+                        legend: { display: false },
                         tooltip: {
                             backgroundColor: 'rgba(0, 0, 0, 0.8)',
                             titleColor: '#ffffff',
@@ -778,31 +821,15 @@
                     },
                     scales: {
                         x: {
-                            grid: {
-                                color: '#333333',
-                                drawBorder: false
-                            },
-                            ticks: {
-                                color: '#b0b0b0',
-                                maxTicksLimit: 8,
-                                font: {
-                                    size: 12
-                                }
-                            }
+                            grid: { color: '#333333', drawBorder: false },
+                            ticks: { color: '#b0b0b0', maxTicksLimit: 8, font: { size: 12 } }
                         },
                         y: {
-                            grid: {
-                                color: '#333333',
-                                drawBorder: false
-                            },
+                            grid: { color: '#333333', drawBorder: false },
                             ticks: {
                                 color: '#b0b0b0',
-                                callback: function(value) {
-                                    return '$' + value.toFixed(0);
-                                },
-                                font: {
-                                    size: 12
-                                }
+                                callback: function(value) { return '$' + value.toFixed(0); },
+                                font: { size: 12 }
                             }
                         }
                     }
@@ -814,24 +841,16 @@
             const labels = [];
             const prices = [];
             const basePrice = currentPrice;
-            
-            // Generate 24 hours of data
             for (let i = 23; i >= 0; i--) {
                 const time = new Date(Date.now() - i * 60 * 60 * 1000);
                 labels.push(time.getHours() + ':00');
-                
-                // Simulate price movement
                 const timeProgress = (24 - i) / 24;
                 const changePercent = priceChangePercent / 100;
                 const priceChange = changePercent * timeProgress;
-                
-                // Add volatility
-                const volatility = 0.015; // 1.5% volatility
+                const volatility = 0.015;
                 const randomWalk = (Math.random() - 0.5) * volatility * Math.sqrt(timeProgress);
-                
                 prices.push(basePrice * (1 + priceChange + randomWalk));
             }
-            
             return { labels, prices };
         }
 
@@ -839,16 +858,12 @@
             document.getElementById('current-price').textContent = `$${currentPrice.toLocaleString()}`;
             document.getElementById('change-amount').textContent = `${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}`;
             document.getElementById('change-percent').textContent = `${priceChange >= 0 ? '+' : ''}${priceChangePercent.toFixed(2)}%`;
-            
             const changeElement = document.getElementById('change-percent');
             changeElement.className = `change-percent ${priceChange >= 0 ? 'change-positive' : 'change-negative'}`;
-            
-            // Update chart info
             const high = currentPrice * 1.005;
             const low = currentPrice * 0.995;
             const open = currentPrice * (1 - priceChangePercent / 200);
             const close = currentPrice;
-            
             document.getElementById('chart-info').textContent = 
                 `O: ${open.toFixed(2)} H: ${high.toFixed(2)} L: ${low.toFixed(2)} C: ${close.toFixed(2)} | ` +
                 `CHANGE: ${priceChangePercent.toFixed(2)}% AMPLITUDE: ${((high - low) / low * 100).toFixed(2)}% | ` +
@@ -856,13 +871,6 @@
         }
 
         function setupEventListeners() {
-            // Pair selector
-            document.getElementById('pair-selector').addEventListener('change', function(e) {
-                currentPair = e.target.value;
-                document.getElementById('pair-name').textContent = currentPair;
-                updatePriceForPair();
-            });
-            
             // Timeframe buttons
             document.querySelectorAll('.timeframe-btn').forEach(btn => {
                 btn.addEventListener('click', function() {
@@ -871,14 +879,12 @@
                     updateChartTimeframe();
                 });
             });
-            
             // Indicator buttons
             document.querySelectorAll('.indicator-btn').forEach(btn => {
                 btn.addEventListener('click', function() {
                     this.classList.toggle('active');
                 });
             });
-            
             // Form inputs
             document.getElementById('buy-price').addEventListener('input', updateBuyTotal);
             document.getElementById('buy-amount').addEventListener('input', updateBuyTotal);
@@ -956,7 +962,6 @@
         }
 
         function updateChartTimeframe() {
-            // Update chart based on selected timeframe
             const data = generateCandlestickData();
             candlestickChart.data.labels = data.labels;
             candlestickChart.data.datasets[0].data = data.prices;
@@ -964,22 +969,17 @@
         }
 
         function startPriceUpdates() {
-            // Simulate real-time price updates
             setInterval(() => {
-                // Small random price movement
                 const change = (Math.random() - 0.5) * 100;
                 currentPrice += change;
                 priceChange += change;
                 priceChangePercent = (priceChange / (currentPrice - priceChange)) * 100;
-                
                 updatePriceInfo();
-                
-                // Update form prices
                 document.getElementById('buy-price').value = currentPrice.toFixed(2);
                 document.getElementById('sell-price').value = currentPrice.toFixed(2);
                 updateBuyTotal();
                 updateSellTotal();
-            }, 5000); // Update every 5 seconds
+            }, 5000);
         }
     </script>
 </body>
