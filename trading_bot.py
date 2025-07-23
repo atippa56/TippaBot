@@ -165,6 +165,13 @@ class TradingBot:
         self.price_history = {}  # symbol -> list of recent prices
         self.max_history_length = 100
         
+        self.popular_symbols = ['bitcoin', 'ethereum', 'binancecoin', 'cardano', 'solana', 'polkadot', 'dogecoin', 'avalanche-2', 'chainlink', 'matic-network']
+        self.popular_market_data = {}
+        self.market_data_lock = threading.Lock()
+        self.last_full_fetch = 0
+        self.full_fetch_interval = 30  # seconds
+        Thread(target=self._background_popular_cache, daemon=True).start()
+        
         logger.info("⚡ HIGH-FREQUENCY RISK-MANAGED TRADING BOT INITIALIZED")
         logger.info(f"⚡ Trading interval: {self.trading_interval}s")
         logger.info(f"🛡️ Risk per trade: {self.risk_per_trade * 100}%")
@@ -186,110 +193,99 @@ class TradingBot:
         self.session.commit()
 
     def _load_available_cryptos(self):
-        """Load available cryptocurrencies from CoinGecko"""
+        """Load available cryptocurrencies from CoinGecko, fallback to popular set if needed"""
+        popular_cryptos = {
+            'bitcoin': 'Bitcoin',
+            'ethereum': 'Ethereum',
+            'binancecoin': 'BNB',
+            'cardano': 'Cardano',
+            'solana': 'Solana',
+            'polkadot': 'Polkadot',
+            'dogecoin': 'Dogecoin',
+            'avalanche-2': 'Avalanche',
+            'matic-network': 'Polygon',
+            'chainlink': 'Chainlink',
+            'ripple': 'XRP',
+            'litecoin': 'Litecoin',
+            'uniswap': 'Uniswap',
+            'stellar': 'Stellar',
+            'cosmos': 'Cosmos',
+            'monero': 'Monero',
+            'algorand': 'Algorand',
+            'vechain': 'VeChain',
+            'filecoin': 'Filecoin',
+            'tron': 'TRON',
+            'eos': 'EOS',
+            'tezos': 'Tezos',
+            'neo': 'NEO',
+            'dash': 'Dash',
+            'zcash': 'Zcash',
+            '0x': '0x Protocol',
+            'aave': 'Aave',
+            'compound': 'Compound',
+            'synthetix': 'Synthetix',
+            'yearn-finance': 'yearn.finance',
+            'curve-dao-token': 'Curve DAO Token',
+            'sushi': 'SushiSwap',
+            'pancakeswap-token': 'PancakeSwap',
+            'chiliz': 'Chiliz',
+            'enjincoin': 'Enjin Coin',
+            'decentraland': 'Decentraland',
+            'sandbox': 'The Sandbox',
+            'axie-infinity': 'Axie Infinity',
+            'gala': 'Gala',
+            'flow': 'Flow',
+            'near': 'NEAR Protocol',
+            'fantom': 'Fantom',
+            'harmony': 'Harmony',
+            'elrond-erd-2': 'Elrond',
+            'hedera-hashgraph': 'Hedera',
+            'theta-token': 'Theta Network',
+            'iota': 'IOTA',
+            'nano': 'Nano',
+            'icon': 'ICON',
+            'ontology': 'Ontology',
+            'qtum': 'Qtum',
+            'omisego': 'OMG Network',
+            'augur': 'Augur',
+            'basic-attention-token': 'Basic Attention Token',
+            'maker': 'Maker',
+            'dai': 'Dai',
+            'usd-coin': 'USD Coin',
+            'tether': 'Tether',
+            'true-usd': 'TrueUSD',
+            'paxos-standard': 'Paxos Standard',
+            'binance-usd': 'Binance USD'
+        }
         try:
             url = "https://api.coingecko.com/api/v3/coins/list"
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
                 cryptos = response.json()
-                
-                # Create a dictionary of all cryptocurrencies
                 all_cryptos = {crypto['id']: crypto['name'] for crypto in cryptos}
-                
-                # Ensure popular cryptocurrencies are always included
-                popular_cryptos = {
-                    'bitcoin': 'Bitcoin',
-                    'ethereum': 'Ethereum',
-                    'binancecoin': 'BNB',
-                    'cardano': 'Cardano',
-                    'solana': 'Solana',
-                    'polkadot': 'Polkadot',
-                    'dogecoin': 'Dogecoin',
-                    'avalanche-2': 'Avalanche',
-                    'matic-network': 'Polygon',
-                    'chainlink': 'Chainlink',
-                    'ripple': 'XRP',
-                    'litecoin': 'Litecoin',
-                    'uniswap': 'Uniswap',
-                    'stellar': 'Stellar',
-                    'cosmos': 'Cosmos',
-                    'monero': 'Monero',
-                    'algorand': 'Algorand',
-                    'vechain': 'VeChain',
-                    'filecoin': 'Filecoin',
-                    'tron': 'TRON',
-                    'eos': 'EOS',
-                    'tezos': 'Tezos',
-                    'neo': 'NEO',
-                    'dash': 'Dash',
-                    'zcash': 'Zcash',
-                    '0x': '0x Protocol',
-                    'aave': 'Aave',
-                    'compound': 'Compound',
-                    'synthetix': 'Synthetix',
-                    'yearn-finance': 'yearn.finance',
-                    'curve-dao-token': 'Curve DAO Token',
-                    'sushi': 'SushiSwap',
-                    'pancakeswap-token': 'PancakeSwap',
-                    'chiliz': 'Chiliz',
-                    'enjincoin': 'Enjin Coin',
-                    'decentraland': 'Decentraland',
-                    'sandbox': 'The Sandbox',
-                    'axie-infinity': 'Axie Infinity',
-                    'gala': 'Gala',
-                    'flow': 'Flow',
-                    'near': 'NEAR Protocol',
-                    'fantom': 'Fantom',
-                    'harmony': 'Harmony',
-                    'elrond-erd-2': 'Elrond',
-                    'hedera-hashgraph': 'Hedera',
-                    'theta-token': 'Theta Network',
-                    'iota': 'IOTA',
-                    'nano': 'Nano',
-                    'icon': 'ICON',
-                    'ontology': 'Ontology',
-                    'qtum': 'Qtum',
-                    'omisego': 'OMG Network',
-                    'augur': 'Augur',
-                    'basic-attention-token': 'Basic Attention Token',
-                    'maker': 'Maker',
-                    'dai': 'Dai',
-                    'usd-coin': 'USD Coin',
-                    'tether': 'Tether',
-                    'true-usd': 'TrueUSD',
-                    'paxos-standard': 'Paxos Standard',
-                    'binance-usd': 'Binance USD'
-                }
-                
                 # Add popular cryptos to the list (they might already be there)
                 for crypto_id, crypto_name in popular_cryptos.items():
                     if crypto_id in all_cryptos:
                         all_cryptos[crypto_id] = crypto_name
-                
                 # Return top 1000 + popular cryptos
                 result = {}
                 count = 0
-                
-                # First add popular cryptos
                 for crypto_id, crypto_name in popular_cryptos.items():
                     if crypto_id in all_cryptos:
                         result[crypto_id] = crypto_name
                         count += 1
-                
-                # Then add others up to 1000 total
                 for crypto_id, crypto_name in all_cryptos.items():
                     if crypto_id not in result and count < 1000:
                         result[crypto_id] = crypto_name
                         count += 1
-                
                 logger.info(f"📋 Loaded {len(result)} available cryptocurrencies (including {len(popular_cryptos)} popular ones)")
                 return result
             else:
-                logger.warning("Failed to load crypto list, using defaults")
-                return {}
+                logger.warning("Failed to load crypto list from CoinGecko, using fallback popular set")
+                return dict(popular_cryptos)
         except Exception as e:
-            logger.error(f"Error loading crypto list: {e}")
-            return {}
+            logger.error(f"Error loading crypto list: {e}. Using fallback popular set.")
+            return dict(popular_cryptos)
 
     def add_custom_crypto(self, crypto_id: str):
         """Add a custom cryptocurrency to the watchlist"""
@@ -312,7 +308,10 @@ class TradingBot:
         return list(self.custom_symbols)
 
     def get_available_cryptos(self):
-        """Get available cryptocurrencies for selection"""
+        """Get available cryptocurrencies for selection, always fallback to popular set if empty"""
+        if not self.available_cryptos:
+            logger.warning("available_cryptos is empty, using fallback popular set")
+            return self._load_available_cryptos()
         return self.available_cryptos
 
     async def fetch_market_data(self):
@@ -979,6 +978,47 @@ class TradingBot:
         """Get current market data"""
         return self.market_data
 
+    def _background_popular_cache(self):
+        while True:
+            try:
+                self._fetch_and_cache(self.popular_symbols, self.popular_market_data)
+            except Exception as e:
+                logger.error(f"Popular cache update failed: {e}")
+            time.sleep(10)
+
+    def _fetch_and_cache(self, symbols, cache):
+        url = f"https://api.coingecko.com/api/v3/simple/price"
+        params = {
+            'ids': ','.join(symbols),
+            'vs_currencies': 'usd',
+            'include_24hr_change': 'true',
+            'include_24hr_vol': 'true',
+            'include_market_cap': 'true'
+        }
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            with self.market_data_lock:
+                for symbol in symbols:
+                    if symbol in data:
+                        crypto_data = data[symbol]
+                        cache[symbol] = {
+                            'price': crypto_data.get('usd', 0),
+                            'change_24h': crypto_data.get('usd_24h_change', 0),
+                            'volume_24h': crypto_data.get('usd_24h_vol', 0),
+                            'market_cap': crypto_data.get('usd_market_cap', 0),
+                            'timestamp': datetime.now()
+                        }
+        else:
+            logger.warning(f"Failed to fetch market data for {symbols}: {response.status_code}")
+
+    def fetch_and_cache_custom(self, custom_symbols):
+        # Fetch and update self.market_data for custom symbols not in popular
+        symbols_to_fetch = [s for s in custom_symbols if s not in self.popular_symbols]
+        if not symbols_to_fetch:
+            return
+        self._fetch_and_cache(symbols_to_fetch, self.market_data)
+
 # SQLAlchemy setup
 load_dotenv()
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///trading_bot.db')
@@ -1072,6 +1112,23 @@ def api_clear_trades():
 def api_market_data():
     """Get market data"""
     return jsonify(trading_bot.get_market_data())
+
+@app.route('/api/market_data/progressive')
+def api_market_data_progressive():
+    # Serve popular coins instantly, fetch the rest in the background
+    custom_symbols = list(trading_bot.custom_symbols)
+    with trading_bot.market_data_lock:
+        data = dict(trading_bot.popular_market_data)
+        # Add any custom symbol data already fetched
+        for symbol in custom_symbols:
+            if symbol in trading_bot.market_data:
+                data[symbol] = trading_bot.market_data[symbol]
+    # Determine which symbols are still pending
+    pending = [s for s in custom_symbols if s not in data]
+    # If there are pending, kick off a background fetch
+    if pending:
+        Thread(target=trading_bot.fetch_and_cache_custom, args=(pending,), daemon=True).start()
+    return jsonify({'data': data, 'pending': pending})
 
 @app.route('/api/start', methods=['POST'])
 def api_start():
@@ -1197,6 +1254,15 @@ def api_verify_admin():
         return jsonify({'success': True})
     else:
         return jsonify({'success': False})
+
+@app.route('/api/reload_cryptos', methods=['POST'])
+def api_reload_cryptos():
+    data = request.get_json()
+    password = data.get('password', '')
+    if password != ADMIN_PASSWORD:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+    trading_bot.available_cryptos = trading_bot._load_available_cryptos()
+    return jsonify({'success': True, 'available': trading_bot.available_cryptos})
 
 if __name__ == '__main__':
     # Start the Flask app

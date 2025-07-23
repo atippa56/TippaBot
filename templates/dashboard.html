@@ -944,14 +944,15 @@
 
     <script>
         let currentData = {};
+        let pendingSymbols = [];
         let selectedCrypto = null;
         let modalChart = null;
         let refreshInterval;
 
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
-            refreshData();
-            refreshInterval = setInterval(refreshData, 10000); // Refresh every 10 seconds
+            refreshDataProgressive();
+            refreshInterval = setInterval(refreshDataProgressive, 10000); // Refresh every 10 seconds
         });
 
         function switchTab(tabName) {
@@ -969,21 +970,23 @@
             }
         }
 
-        async function refreshData() {
+        async function refreshDataProgressive() {
             try {
                 // Update status
                 const statusResponse = await fetch('/api/status');
                 const statusData = await statusResponse.json();
                 updateStatus(statusData);
-                
-                // Update market data
-                const marketResponse = await fetch('/api/market_data');
-                const marketData = await marketResponse.json();
-                currentData = marketData;
-                
-                // Update watchlist with both custom symbols and market data
-                updateWatchlist(statusData.custom_symbols, marketData);
-                
+
+                // Progressive market data
+                const marketResponse = await fetch('/api/market_data/progressive');
+                const marketPayload = await marketResponse.json();
+                currentData = marketPayload.data;
+                pendingSymbols = marketPayload.pending;
+                updateWatchlist(statusData.custom_symbols, currentData, pendingSymbols);
+                // If there are still pending, poll again in 2s
+                if (pendingSymbols && pendingSymbols.length > 0) {
+                    setTimeout(refreshDataProgressive, 2000);
+                }
                 // Update positions and trades
                 await refreshTradesData();
             } catch (error) {
@@ -1041,30 +1044,22 @@
             document.getElementById('trading-mode').textContent = data.trading_mode;
         }
 
-        function updateWatchlist(customSymbols, marketData) {
+        function updateWatchlist(customSymbols, marketData, pending=[]) {
             const cryptoGrid = document.getElementById('crypto-grid');
-            
             if (!customSymbols || customSymbols.length === 0) {
                 cryptoGrid.innerHTML = '<div class="no-data"><i class="fas fa-plus-circle"></i><div>No cryptocurrencies in watchlist<br><small>Search and add cryptocurrencies above</small></div></div>';
                 return;
             }
-            
             cryptoGrid.innerHTML = '';
-            
             customSymbols.forEach(symbol => {
                 const cryptoCard = document.createElement('div');
                 cryptoCard.className = 'crypto-card';
-                
-                // Check if we have market data for this symbol
                 const data = marketData[symbol];
-                
                 if (data) {
                     // We have market data, show full card
                     cryptoCard.onclick = () => openCryptoModal(symbol, data);
-                    
                     const changeClass = data.change_24h >= 0 ? 'positive' : 'negative';
                     const changeSymbol = data.change_24h >= 0 ? '+' : '';
-                    
                     cryptoCard.innerHTML = `
                         <div class="crypto-header">
                             <div class="crypto-symbol">${symbol.toUpperCase()}</div>
@@ -1087,8 +1082,8 @@
                             <span class="crypto-change ${changeClass}">${changeSymbol}${data.change_24h.toFixed(2)}%</span>
                         </div>
                     `;
-                } else {
-                    // No market data yet, show placeholder card
+                } else if (pending.includes(symbol)) {
+                    // Pending data
                     cryptoCard.innerHTML = `
                         <div class="crypto-header">
                             <div class="crypto-symbol">${symbol.toUpperCase()}</div>
@@ -1106,8 +1101,26 @@
                             </button>
                         </div>
                     `;
+                } else {
+                    // Fallback
+                    cryptoCard.innerHTML = `
+                        <div class="crypto-header">
+                            <div class="crypto-symbol">${symbol.toUpperCase()}</div>
+                            <div class="crypto-price">Unavailable</div>
+                        </div>
+                        <div class="crypto-stats">
+                            <div class="crypto-stat">
+                                <div class="crypto-stat-label">Status</div>
+                                <div class="crypto-stat-value">Unavailable</div>
+                            </div>
+                        </div>
+                        <div class="crypto-actions">
+                            <button class="btn-icon" onclick="event.stopPropagation(); removeCrypto('${symbol}')">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    `;
                 }
-                
                 cryptoGrid.appendChild(cryptoCard);
             });
         }
@@ -1389,6 +1402,11 @@
             try {
                 const response = await fetch('/api/custom_cryptos');
                 const data = await response.json();
+                if (!data.available || Object.keys(data.available).length === 0) {
+                    resultsDiv.innerHTML = '<div class="no-results">Crypto search is temporarily unavailable. Please try again later.</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
                 
                 // Define popular cryptocurrencies with their common names and symbols
                 const popularCryptos = {
@@ -1536,7 +1554,7 @@
                     showMessage(`✅ Added ${cryptoId.toUpperCase()} to watchlist`, 'success');
                     document.getElementById('crypto-search').value = '';
                     document.getElementById('search-results').style.display = 'none';
-                    refreshData();
+                    refreshDataProgressive(); // Refresh to show updated watchlist
                 } else {
                     showMessage('❌ Failed to add crypto: ' + data.error, 'error');
                 }
@@ -1556,7 +1574,7 @@
                 
                 if (data.success) {
                     showMessage(`✅ Removed ${cryptoId.toUpperCase()} from watchlist`, 'success');
-                    refreshData();
+                    refreshDataProgressive(); // Refresh to show updated watchlist
                 } else {
                     showMessage('❌ Failed to remove crypto: ' + data.error, 'error');
                 }
@@ -1571,7 +1589,7 @@
                 const data = await response.json();
                 if (data.success) {
                     showMessage('🚀 Trading started successfully!', 'success');
-                    refreshData();
+                    refreshDataProgressive();
                 } else {
                     showMessage('❌ Failed to start trading: ' + data.error, 'error');
                 }
@@ -1586,7 +1604,7 @@
                 const data = await response.json();
                 if (data.success) {
                     showMessage('🛑 Trading stopped successfully!', 'success');
-                    refreshData();
+                    refreshDataProgressive();
                 } else {
                     showMessage('❌ Failed to stop trading: ' + data.error, 'error');
                 }
