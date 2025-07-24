@@ -1258,30 +1258,17 @@
 
         function openCryptoModal(symbol, data) {
             selectedCrypto = symbol;
-            
-            // Open the sophisticated trading view in a new window
-            const tradingWindow = window.open(`/trading_view?symbol=${symbol}`, '_blank', 
-                'width=1400,height=900,scrollbars=yes,resizable=yes');
-            
-            if (!tradingWindow) {
-                // Fallback to simple modal if popup is blocked
-                document.getElementById('modal-title').textContent = symbol.toUpperCase();
-                document.getElementById('modal-price').textContent = `$${data.price.toFixed(2)}`;
-                
-                const changeElement = document.getElementById('modal-change');
-                const changeClass = data.change_24h >= 0 ? 'positive' : 'negative';
-                changeElement.textContent = `${data.change_24h >= 0 ? '+' : ''}${data.change_24h.toFixed(2)}%`;
-                changeElement.className = `modal-stat-value ${changeClass}`;
-                
-                document.getElementById('modal-volume').textContent = `$${(data.volume_24h / 1000000).toFixed(1)}M`;
-                document.getElementById('modal-mcap').textContent = `$${(data.market_cap / 1000000000).toFixed(1)}B`;
-                
-                // Show modal
-                document.getElementById('crypto-modal').classList.add('active');
-                
-                // Update chart
-                updateModalChart(symbol, data);
-            }
+            // Always show the current price in the modal
+            document.getElementById('modal-title').textContent = symbol.toUpperCase();
+            document.getElementById('modal-price').textContent = `$${data.price.toFixed(2)}`;
+            const changeElement = document.getElementById('modal-change');
+            const changeClass = data.change_24h >= 0 ? 'positive' : 'negative';
+            changeElement.textContent = `${data.change_24h >= 0 ? '+' : ''}${data.change_24h.toFixed(2)}%`;
+            changeElement.className = `modal-stat-value ${changeClass}`;
+            document.getElementById('modal-volume').textContent = `$${(data.volume_24h / 1000000).toFixed(1)}M`;
+            document.getElementById('modal-mcap').textContent = `$${(data.market_cap / 1000000000).toFixed(1)}B`;
+            document.getElementById('crypto-modal').classList.add('active');
+            updateModalChart(symbol, data);
         }
 
         function closeModal() {
@@ -1294,36 +1281,30 @@
 
         function updateModalChart(symbol, data) {
             const ctx = document.getElementById('modal-chart').getContext('2d');
-            
             if (modalChart) {
                 modalChart.destroy();
             }
-            
             // Generate more realistic price data for the last 24 hours
             const hours = 24;
             const labels = [];
             const prices = [];
-            const volumes = [];
             const basePrice = data.price;
-            const baseVolume = data.volume_24h / 24;
-            
             for (let i = hours; i >= 0; i--) {
                 const time = new Date(Date.now() - i * 60 * 60 * 1000);
                 labels.push(time.getHours() + ':00');
-                
-                // Simulate more realistic price movement
+                // Simulate price movement
                 const changePercent = data.change_24h / 100;
                 const timeProgress = (hours - i) / hours;
                 const priceChange = changePercent * timeProgress;
-                
                 // Add some volatility
-                const volatility = 0.02; // 2% volatility
+                const volatility = 0.01; // 1% volatility
                 const randomWalk = (Math.random() - 0.5) * volatility * Math.sqrt(timeProgress);
-                
                 prices.push(basePrice * (1 + priceChange + randomWalk));
-                volumes.push(baseVolume * (0.8 + Math.random() * 0.4)); // Random volume variation
             }
-            
+            // Create gradient fill
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, 'rgba(0,212,170,0.4)');
+            gradient.addColorStop(1, 'rgba(10,10,10,0.1)');
             modalChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -1332,32 +1313,30 @@
                         label: `${symbol.toUpperCase()} Price`,
                         data: prices,
                         borderColor: '#00d4aa',
-                        backgroundColor: 'rgba(0, 212, 170, 0.1)',
+                        backgroundColor: gradient,
                         borderWidth: 3,
                         fill: true,
                         tension: 0.4,
                         pointRadius: 0,
-                        pointHoverRadius: 8,
+                        pointHoverRadius: 6,
                         pointHoverBackgroundColor: '#00d4aa',
-                        pointHoverBorderColor: '#ffffff',
-                        pointHoverBorderWidth: 2
+                        pointHoverBorderColor: '#fff',
+                        pointHoverBorderWidth: 2,
+                        shadowOffsetX: 0,
+                        shadowOffsetY: 4,
+                        shadowBlur: 10,
+                        shadowColor: 'rgba(0,0,0,0.15)'
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    interaction: {
-                        intersect: false,
-                        mode: 'index'
-                    },
                     plugins: {
-                        legend: {
-                            display: false
-                        },
+                        legend: { display: false },
                         tooltip: {
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                            titleColor: '#ffffff',
-                            bodyColor: '#ffffff',
+                            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
                             borderColor: '#00d4aa',
                             borderWidth: 1,
                             cornerRadius: 8,
@@ -1369,33 +1348,18 @@
                             }
                         }
                     },
+                    interaction: { intersect: false, mode: 'index' },
                     scales: {
                         x: {
-                            grid: {
-                                color: '#333333',
-                                drawBorder: false
-                            },
-                            ticks: {
-                                color: '#b0b0b0',
-                                maxTicksLimit: 8,
-                                font: {
-                                    size: 12
-                                }
-                            }
+                            grid: { color: '#222', drawBorder: false },
+                            ticks: { color: '#b0b0b0', maxTicksLimit: 8, font: { size: 12 } }
                         },
                         y: {
-                            grid: {
-                                color: '#333333',
-                                drawBorder: false
-                            },
+                            grid: { color: '#222', drawBorder: false },
                             ticks: {
                                 color: '#b0b0b0',
-                                callback: function(value) {
-                                    return '$' + value.toFixed(2);
-                                },
-                                font: {
-                                    size: 12
-                                }
+                                callback: function(value) { return '$' + value.toFixed(2); },
+                                font: { size: 12 }
                             }
                         }
                     }
