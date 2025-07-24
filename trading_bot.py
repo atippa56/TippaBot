@@ -1089,6 +1089,16 @@ CORS(app)
 # Global trading bot instance
 trading_bot = TradingBot()
 
+# Global cache for market data
+market_data_cache = {
+    'data': {},
+    'symbols': [],
+    'timestamp': 0,
+    'backoff_until': 0
+}
+CACHE_TTL = 60  # seconds
+BACKOFF_TIME = 60  # seconds
+
 @app.route('/')
 def dashboard():
     """Main dashboard"""
@@ -1150,12 +1160,20 @@ def api_market_data_progressive():
 
 @app.route('/api/market_data_direct', methods=['POST'])
 def api_market_data_direct():
-    """Fetch market data directly from CoinGecko for requested symbols (decoupled from bot state)"""
+    """Fetch market data directly from CoinGecko for requested symbols (decoupled from bot state, with cache and rate-limit handling)"""
     try:
         data = request.get_json()
         symbols = data.get('symbols', [])
-        if not symbols:
-            return jsonify({'error': 'No symbols provided'}), 400
+        now = time.time()
+        # Serve cached data if fresh and symbols match
+        if (
+            set(symbols) == set(market_data_cache['symbols']) and
+            now - market_data_cache['timestamp'] < CACHE_TTL
+        ):
+            return jsonify({'data': market_data_cache['data']})
+        # If in backoff, serve last cached data
+        if now < market_data_cache['backoff_until']:
+            return jsonify({'data': market_data_cache['data'], 'warning': 'Rate limited, serving cached data'})
         url = f"https://api.coingecko.com/api/v3/simple/price"
         params = {
             'ids': ','.join(symbols),
@@ -1178,7 +1196,15 @@ def api_market_data_direct():
                         'market_cap': crypto_data.get('usd_market_cap', 0),
                         'timestamp': datetime.now().isoformat()
                     }
+            # Update cache
+            market_data_cache['data'] = result
+            market_data_cache['symbols'] = symbols
+            market_data_cache['timestamp'] = now
             return jsonify({'data': result})
+        elif response.status_code == 429:
+            # Rate limited: back off and serve cached data
+            market_data_cache['backoff_until'] = now + BACKOFF_TIME
+            return jsonify({'data': market_data_cache['data'], 'warning': 'Rate limited, serving cached data'}), 200
         else:
             return jsonify({'error': f'Failed to fetch market data: {response.status_code}'}), 500
     except Exception as e:
