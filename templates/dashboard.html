@@ -980,16 +980,26 @@
                 const statusData = await statusResponse.json();
                 updateStatus(statusData);
 
-                // Progressive market data
-                const marketResponse = await fetch('/api/market_data/progressive');
-                const marketPayload = await marketResponse.json();
-                currentData = marketPayload.data;
-                pendingSymbols = marketPayload.pending;
-                updateWatchlist(statusData.custom_symbols, currentData, pendingSymbols);
-                // If there are still pending, poll again in 2s
-                if (pendingSymbols && pendingSymbols.length > 0) {
-                    setTimeout(refreshDataProgressive, 2000);
+                // Get custom symbols for the watchlist
+                const customSymbols = statusData.custom_symbols || [];
+                let marketData = {};
+                let pendingSymbols = [];
+                if (customSymbols.length > 0) {
+                    // Fetch market data directly for all watchlist symbols
+                    const directResp = await fetch('/api/market_data_direct', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ symbols: customSymbols })
+                    });
+                    const directData = await directResp.json();
+                    if (directData.data) {
+                        marketData = directData.data;
+                    } else {
+                        // fallback: mark all as pending if error
+                        pendingSymbols = customSymbols;
+                    }
                 }
+                updateWatchlist(customSymbols, marketData, pendingSymbols);
                 // Update positions and trades
                 await refreshTradesData();
             } catch (error) {
