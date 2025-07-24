@@ -957,11 +957,10 @@ class TradingBot:
         }
 
     def get_positions(self):
-        """Get current positions"""
+        """Get current open positions only"""
         # Update PnL for all open positions
         for symbol in self.session.query(PositionDB).filter_by(status='OPEN').all():
             self._update_position_pnl(symbol.symbol)
-        
         return [
             {
                 'symbol': p.symbol,
@@ -975,7 +974,7 @@ class TradingBot:
                 'exit_price': p.exit_price,
                 'exit_time': p.exit_time,
                 'realized_pnl': p.realized_pnl
-            } for p in self.session.query(PositionDB).all()
+            } for p in self.session.query(PositionDB).filter_by(status='OPEN').all()
         ]
 
     def get_trades(self):
@@ -1148,6 +1147,42 @@ def api_market_data_progressive():
     if pending:
         Thread(target=trading_bot.fetch_and_cache_custom, args=(pending,), daemon=True).start()
     return jsonify({'data': data, 'pending': pending})
+
+@app.route('/api/market_data_direct', methods=['POST'])
+def api_market_data_direct():
+    """Fetch market data directly from CoinGecko for requested symbols (decoupled from bot state)"""
+    try:
+        data = request.get_json()
+        symbols = data.get('symbols', [])
+        if not symbols:
+            return jsonify({'error': 'No symbols provided'}), 400
+        url = f"https://api.coingecko.com/api/v3/simple/price"
+        params = {
+            'ids': ','.join(symbols),
+            'vs_currencies': 'usd',
+            'include_24hr_change': 'true',
+            'include_24hr_vol': 'true',
+            'include_market_cap': 'true'
+        }
+        response = requests.get(url, params=params, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            result = {}
+            for symbol in symbols:
+                if symbol in data:
+                    crypto_data = data[symbol]
+                    result[symbol] = {
+                        'price': crypto_data.get('usd', 0),
+                        'change_24h': crypto_data.get('usd_24h_change', 0),
+                        'volume_24h': crypto_data.get('usd_24h_vol', 0),
+                        'market_cap': crypto_data.get('usd_market_cap', 0),
+                        'timestamp': datetime.now().isoformat()
+                    }
+            return jsonify({'data': result})
+        else:
+            return jsonify({'error': f'Failed to fetch market data: {response.status_code}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/start', methods=['POST'])
 def api_start():
