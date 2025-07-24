@@ -755,6 +755,22 @@
         ::-webkit-scrollbar-thumb:hover {
             background: var(--text-muted);
         }
+        .modal-range-row { display: flex; gap: 8px; margin-top: 10px; }
+        .modal-range-btn {
+            background: #23272f;
+            color: #b0b0b0;
+            border: none;
+            border-radius: 7px;
+            padding: 7px 18px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+        .modal-range-btn.active, .modal-range-btn:hover {
+            background: #00d4aa;
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -881,6 +897,13 @@
                         <span class="modal-stat" id="modal-volume">$0.00</span>
                         <span class="modal-stat" id="modal-mcap">$0.00</span>
                     </div>
+                    <div class="modal-range-row" style="margin-top:18px;">
+                        <button class="modal-range-btn" data-range="1D">1D</button>
+                        <button class="modal-range-btn" data-range="1W">1W</button>
+                        <button class="modal-range-btn" data-range="1M">1M</button>
+                        <button class="modal-range-btn" data-range="1Y">1Y</button>
+                        <button class="modal-range-btn" data-range="5Y">5Y</button>
+                    </div>
                 </div>
                 <button class="modal-close" onclick="closeModal()">
                     <i class="fas fa-times"></i>
@@ -890,6 +913,23 @@
             <div class="modal-chart-area">
                 <div class="chart-container">
                     <canvas id="modal-chart"></canvas>
+                </div>
+                <div id="modal-trades-section" style="margin-top:32px;">
+                    <h3 style="color:#fff;font-size:1.1em;margin-bottom:10px;">Live Exchange Trades</h3>
+                    <div id="modal-trades-table" style="background:#20232a;border-radius:10px;padding:12px 0;overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;color:#b0b0b0;font-size:0.98em;">
+                            <thead>
+                                <tr style="border-bottom:1px solid #23272f;">
+                                    <th style="padding:6px 12px;text-align:left;">Price (USDT)</th>
+                                    <th style="padding:6px 12px;text-align:left;">Amount</th>
+                                    <th style="padding:6px 12px;text-align:left;">Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modal-trades-tbody">
+                                <tr><td colspan="3" style="text-align:center;color:#666;padding:12px;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -930,6 +970,20 @@
         let selectedCrypto = null;
         let modalChart = null;
         let refreshInterval;
+
+        // Add mapping from CoinGecko ID to Binance symbol
+        const COINGECKO_TO_BINANCE = {
+            'bitcoin': 'BTCUSDT',
+            'ethereum': 'ETHUSDT',
+            'binancecoin': 'BNBUSDT',
+            'cardano': 'ADAUSDT',
+            'solana': 'SOLUSDT',
+            'polkadot': 'DOTUSDT',
+            'dogecoin': 'DOGEUSDT',
+            'avalanche-2': 'AVAXUSDT',
+            'chainlink': 'LINKUSDT',
+            'matic-network': 'MATICUSDT'
+        };
 
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
@@ -1237,6 +1291,7 @@
 
         function openCryptoModal(symbol, data) {
             selectedCrypto = symbol;
+            modalCurrentRange = '1D';
             // Set modal header
             document.getElementById('modal-title').textContent = symbol.toUpperCase();
             document.getElementById('modal-price').textContent = `$${data.price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
@@ -1247,7 +1302,24 @@
             document.getElementById('modal-volume').textContent = `$${(data.volume_24h / 1000000).toFixed(1)}M`;
             document.getElementById('modal-mcap').textContent = `$${(data.market_cap / 1000000000).toFixed(1)}B`;
             document.getElementById('crypto-modal').classList.add('active');
-            updateModalChart(symbol, data);
+            // Set range button active
+            document.querySelectorAll('.modal-range-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-range') === modalCurrentRange) btn.classList.add('active');
+                btn.onclick = () => { setModalRange(symbol, data, btn.getAttribute('data-range')); };
+            });
+            updateModalChart(symbol, data, modalCurrentRange);
+            fetchBinanceTrades(symbol);
+        }
+
+        function setModalRange(symbol, data, range) {
+            modalCurrentRange = range;
+            document.querySelectorAll('.modal-range-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-range') === range) btn.classList.add('active');
+            });
+            updateModalChart(symbol, data, range);
+            fetchBinanceTrades(symbol);
         }
 
         function closeModal() {
@@ -1258,26 +1330,33 @@
             }
         }
 
-        function updateModalChart(symbol, data) {
+        async function updateModalChart(symbol, data, range) {
             const ctx = document.getElementById('modal-chart').getContext('2d');
             if (modalChart) modalChart.destroy();
-            // Generate price and volume data for 24h
-            const hours = 24;
-            const labels = [];
-            const prices = [];
-            const volumes = [];
-            const basePrice = data.price;
-            const baseVolume = data.volume_24h / 24;
-            for (let i = hours; i >= 0; i--) {
-                const time = new Date(Date.now() - i * 60 * 60 * 1000);
-                labels.push(time.getHours() + ':00');
-                const changePercent = data.change_24h / 100;
-                const timeProgress = (hours - i) / hours;
-                const priceChange = changePercent * timeProgress;
-                const volatility = 0.01;
-                const randomWalk = (Math.random() - 0.5) * volatility * Math.sqrt(timeProgress);
-                prices.push(basePrice * (1 + priceChange + randomWalk));
-                volumes.push(baseVolume * (0.8 + Math.random() * 0.4));
+            // Map range to CoinGecko days param
+            let days = 1;
+            if (range === '1W') days = 7;
+            else if (range === '1M') days = 30;
+            else if (range === '1Y') days = 365;
+            else if (range === '5Y') days = 'max';
+            // Fetch historical data from CoinGecko
+            let prices = [], volumes = [], labels = [];
+            try {
+                const resp = await fetch(`https://api.coingecko.com/api/v3/coins/${symbol}/market_chart?vs_currency=usd&days=${days}`);
+                const hist = await resp.json();
+                if (hist.prices && hist.total_volumes) {
+                    prices = hist.prices.map(p => p[1]);
+                    volumes = hist.total_volumes.map(v => v[1]);
+                    labels = hist.prices.map(p => {
+                        const d = new Date(p[0]);
+                        return days === 1 ? `${d.getHours()}:00` : `${d.getMonth()+1}/${d.getDate()}`;
+                    });
+                }
+            } catch (e) {
+                // fallback to current price
+                prices = [data.price];
+                volumes = [data.volume_24h];
+                labels = ['Now'];
             }
             // Gradient for area
             const gradient = ctx.createLinearGradient(0, 0, 0, 400);
@@ -1664,6 +1743,30 @@
         }
         function stopBot() {
             fetch('/api/stop', { method: 'POST' }).then(() => loadCustomizationPanel());
+        }
+
+        // Fetch recent trades from Binance and update the trades table
+        async function fetchBinanceTrades(symbol) {
+            const binanceSymbol = COINGECKO_TO_BINANCE[symbol] || '';
+            const tbody = document.getElementById('modal-trades-tbody');
+            if (!binanceSymbol) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#666;padding:12px;">Not available</td></tr>';
+                return;
+            }
+            try {
+                const resp = await fetch(`https://api.binance.com/api/v3/trades?symbol=${binanceSymbol}&limit=20`);
+                const trades = await resp.json();
+                tbody.innerHTML = '';
+                trades.forEach(trade => {
+                    const price = parseFloat(trade.price);
+                    const qty = parseFloat(trade.qty);
+                    const time = new Date(trade.time);
+                    const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    tbody.innerHTML += `<tr><td style="color:${trade.isBuyerMaker ? '#ff6b6b' : '#00d4aa'};font-weight:600;">$${price.toFixed(2)}</td><td>${qty}</td><td>${timeStr}</td></tr>`;
+                });
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#666;padding:12px;">Not available</td></tr>';
+            }
         }
 
         // Close search results when clicking outside
