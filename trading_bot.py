@@ -35,6 +35,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.exc import OperationalError
 from threading import Thread
+import fast_market  # C++ extension for fast analytics
 
 # Configure logging
 logging.basicConfig(
@@ -192,6 +193,19 @@ class TradingBot:
             row = BalanceDB(value=value)
             self.session.add(row)
         self.session.commit()
+
+    def fast_moving_average(self, prices, window):
+        """Compute moving average using C++ extension."""
+        return fast_market.moving_average(prices, window)
+
+    def fast_min(self, prices):
+        return fast_market.min_price(prices)
+
+    def fast_max(self, prices):
+        return fast_market.max_price(prices)
+
+    def fast_sum(self, prices):
+        return fast_market.sum_prices(prices)
 
     def _load_available_cryptos(self):
         """Load available cryptocurrencies from CoinGecko, fallback to popular set if needed"""
@@ -368,9 +382,9 @@ class TradingBot:
                 logger.debug(f"Updated {symbol} price: {position.entry_price} -> {position.current_price}")
             
             if position.side == 'LONG':
-                position.unrealized_pnl = (position.current_price - position.entry_price) * position.quantity
+                position.unrealized_pnl = round((position.current_price - position.entry_price) * position.quantity, 2)
             else:  # SHORT
-                position.unrealized_pnl = (position.entry_price - position.current_price) * position.quantity
+                position.unrealized_pnl = round((position.entry_price - position.current_price) * position.quantity, 2)
             
             logger.debug(f"{symbol} PnL: ${position.unrealized_pnl:.2f} ({(position.current_price - position.entry_price) / position.entry_price * 100:.2f}%)")
 
@@ -527,8 +541,10 @@ class TradingBot:
         # Calculate volatility (standard deviation of recent prices)
         if len(prices) >= 10:
             recent_prices = prices[-10:]
-            mean_price = sum(recent_prices) / len(recent_prices)
-            variance = sum((p - mean_price) ** 2 for p in recent_prices) / len(recent_prices)
+            # mean_price = sum(recent_prices) / len(recent_prices)
+            mean_price = self.fast_sum(recent_prices) / len(recent_prices)
+            # variance = sum((p - mean_price) ** 2 for p in recent_prices) / len(recent_prices)
+            variance = self.fast_sum([(p - mean_price) ** 2 for p in recent_prices]) / len(recent_prices)
             volatility = variance ** 0.5
             volatility_percent = (volatility / mean_price) * 100
             
@@ -759,20 +775,26 @@ class TradingBot:
                 if not position:
                     logger.info(f"⚠️ No open position to sell for {signal.symbol}")
                     return
-                
+
+                # Calculate realized PnL and enforce minimum profit threshold
+                realized_pnl = round((signal.price - position.entry_price) * position.quantity, 2)
+                if realized_pnl < 0.01:
+                    logger.info(f"❌ Not selling {signal.symbol}: profit ${realized_pnl:.2f} is less than $0.01")
+                    return
+
                 # Close position
                 position.status = 'CLOSED'
                 position.exit_price = signal.price
                 position.exit_time = signal.timestamp
-                position.realized_pnl = (signal.price - position.entry_price) * position.quantity
-                
+                position.realized_pnl = realized_pnl
+
                 # Add back the position value to balance
                 position_value = signal.price * position.quantity
                 self.balance += position_value
-                
+
                 # Set cooldown for this symbol
                 self.position_cooldown[signal.symbol] = datetime.now()
-                
+
                 # Record completed trade (only SELL trades with realized PnL)
                 trade = TradeDB(
                     trade_id=f"trade_{len(self.session.query(TradeDB).all()) + 1}",
@@ -782,17 +804,17 @@ class TradingBot:
                     quantity=position.quantity,  # Use position quantity, not signal quantity
                     timestamp=signal.timestamp,
                     strategy=signal.strategy,
-                    pnl=position.realized_pnl
+                    pnl=realized_pnl
                 )
                 self.session.add(trade)
                 self.session.commit()
-                
+
                 # Limit trades history
                 if len(self.session.query(TradeDB).all()) > self.max_trades_history:
                     self.session.query(TradeDB).order_by(TradeDB.id).first().delete()
                     self.session.commit()
-                
-                logger.info(f"🔴 AGGRESSIVE SELL: {position.quantity:.4f} {signal.symbol} @ ${signal.price:.2f} | Strategy: {signal.strategy} | PnL: ${position.realized_pnl:.2f} | Confidence: {signal.confidence:.2f}")
+
+                logger.info(f"🔴 AGGRESSIVE SELL: {position.quantity:.4f} {signal.symbol} @ ${signal.price:.2f} | Strategy: {signal.strategy} | PnL: ${realized_pnl:.2f} | Confidence: {signal.confidence:.2f}")
                 
         except Exception as e:
             logger.error(f"Error executing trade: {e}")
@@ -854,26 +876,25 @@ class TradingBot:
                 if symbol in self.market_data:
                     current_price = self.market_data[symbol]['price']
                 else:
-                    # Fallback to entry price if no market data
-                    current_price = position.entry_price
-                
+                    current_price = position.current_price
                 # Calculate PnL
                 if position.side == 'LONG':
-                    pnl = (current_price - position.entry_price) * position.quantity
+                    pnl = round((current_price - position.entry_price) * position.quantity, 2)
                 else:
-                    pnl = (position.entry_price - current_price) * position.quantity
-                
+                    pnl = round((position.entry_price - current_price) * position.quantity, 2)
+                # Only close if profit is at least $0.01
+                if pnl < 0.01:
+                    logger.info(f"❌ Not closing {symbol}: profit ${pnl:.2f} is less than $0.01")
+                    continue
                 # Close the position
                 position.status = 'CLOSED'
                 position.exit_price = current_price
                 position.exit_time = datetime.now()
                 position.realized_pnl = pnl
                 position.unrealized_pnl = 0
-                
                 # Add balance back (for LONG positions, we get the current value)
                 if position.side == 'LONG':
                     self.balance += current_price * position.quantity
-                
                 # Record the trade
                 trade_id = f"trade_{len(self.session.query(TradeDB).all()) + 1}"
                 trade = TradeDB(
@@ -888,13 +909,10 @@ class TradingBot:
                 )
                 self.session.add(trade)
                 self.session.commit()
-                
                 closed_count += 1
                 logger.info(f"🚨 EMERGENCY CLOSE: {symbol} @ ${current_price:.4f} | PnL: ${pnl:.4f}")
-                
             except Exception as e:
                 logger.error(f"Error closing position {symbol}: {e}")
-        
         if closed_count > 0:
             logger.info(f"🚨 EMERGENCY CLOSE: Closed {closed_count} positions")
         return closed_count
