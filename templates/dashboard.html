@@ -985,53 +985,11 @@
             'matic-network': 'MATICUSDT'
         };
 
-        // === BEGIN: TESTABLE PRELOAD POPULAR CRYPTOS ===
-        const DEFAULT_POPULAR_CRYPTOS = ['bitcoin', 'ethereum', 'binancecoin'];
-        let userWatchlist = [];
-        let isFirstLoad = true;
-
-        // Override refreshDataProgressive to preload popular cryptos
-        async function refreshDataProgressive() {
-            try {
-                // Update status
-                const statusResponse = await fetch('/api/status');
-                const statusData = await statusResponse.json();
-                updateStatus(statusData);
-
-                // On first load, use popular cryptos if watchlist is empty
-                let customSymbols = statusData.custom_symbols || [];
-                if (isFirstLoad && (!customSymbols || customSymbols.length === 0)) {
-                    customSymbols = [...DEFAULT_POPULAR_CRYPTOS];
-                    userWatchlist = [...DEFAULT_POPULAR_CRYPTOS];
-                } else {
-                    userWatchlist = customSymbols;
-                }
-                isFirstLoad = false;
-
-                let marketData = {};
-                let pendingSymbols = [];
-                if (customSymbols.length > 0) {
-                    // Fetch market data directly for all watchlist symbols
-                    const directResp = await fetch('/api/market_data_direct', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ symbols: customSymbols })
-                    });
-                    const directData = await directResp.json();
-                    if (directData.data) {
-                        marketData = directData.data;
-                    } else {
-                        pendingSymbols = customSymbols;
-                    }
-                }
-                updateWatchlist(customSymbols, marketData, pendingSymbols);
-                await refreshTradesData();
-            } catch (error) {
-                console.error('Error refreshing data:', error);
-                showMessage('Error refreshing data: ' + error.message, 'error');
-            }
-        }
-        // === END: TESTABLE PRELOAD POPULAR CRYPTOS ===
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshDataProgressive();
+            refreshInterval = setInterval(refreshDataProgressive, 10000); // Refresh every 10 seconds
+        });
 
         function switchTab(tabName) {
             // Update tab buttons
@@ -1045,6 +1003,41 @@
             // Refresh data for the selected tab
             if (tabName === 'trades') {
                 refreshTradesData();
+            }
+        }
+
+        async function refreshDataProgressive() {
+            try {
+                // Update status
+                const statusResponse = await fetch('/api/status');
+                const statusData = await statusResponse.json();
+                updateStatus(statusData);
+
+                // Get custom symbols for the watchlist
+                const customSymbols = statusData.custom_symbols || [];
+                let marketData = {};
+                let pendingSymbols = [];
+                if (customSymbols.length > 0) {
+                    // Fetch market data directly for all watchlist symbols
+                    const directResp = await fetch('/api/market_data_direct', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ symbols: customSymbols })
+                    });
+                    const directData = await directResp.json();
+                    if (directData.data) {
+                        marketData = directData.data;
+                    } else {
+                        // fallback: mark all as pending if error
+                        pendingSymbols = customSymbols;
+                    }
+                }
+                updateWatchlist(customSymbols, marketData, pendingSymbols);
+                // Update positions and trades
+                await refreshTradesData();
+            } catch (error) {
+                console.error('Error refreshing data:', error);
+                showMessage('Error refreshing data: ' + error.message, 'error');
             }
         }
 
@@ -1337,36 +1330,35 @@
             }
         }
 
-        // === BEGIN: TESTABLE GRAPH FALLBACK ===
         async function updateModalChart(symbol, data, range) {
             const ctx = document.getElementById('modal-chart').getContext('2d');
             if (modalChart) modalChart.destroy();
+            // Map range to CoinGecko days param
             let days = 1;
             if (range === '1W') days = 7;
             else if (range === '1M') days = 30;
             else if (range === '1Y') days = 365;
             else if (range === '5Y') days = 'max';
+            // Fetch historical data from CoinGecko
             let prices = [], volumes = [], labels = [];
-            let hasData = false;
             try {
                 const resp = await fetch(`https://api.coingecko.com/api/v3/coins/${symbol}/market_chart?vs_currency=usd&days=${days}`);
                 const hist = await resp.json();
-                if (hist.prices && hist.total_volumes && hist.prices.length > 1) {
+                if (hist.prices && hist.total_volumes) {
                     prices = hist.prices.map(p => p[1]);
                     volumes = hist.total_volumes.map(v => v[1]);
                     labels = hist.prices.map(p => {
                         const d = new Date(p[0]);
                         return days === 1 ? `${d.getHours()}:00` : `${d.getMonth()+1}/${d.getDate()}`;
                     });
-                    hasData = true;
                 }
-            } catch (e) {}
-            if (!hasData) {
-                // Fallback: flat line at current price
-                prices = [data.price, data.price];
-                volumes = [data.volume_24h, data.volume_24h];
-                labels = ['Now', 'Now+1'];
+            } catch (e) {
+                // fallback to current price
+                prices = [data.price];
+                volumes = [data.volume_24h];
+                labels = ['Now'];
             }
+            // Gradient for area
             const gradient = ctx.createLinearGradient(0, 0, 0, 400);
             gradient.addColorStop(0, 'rgba(0,212,170,0.4)');
             gradient.addColorStop(1, 'rgba(24,26,32,0.1)');
@@ -1457,30 +1449,7 @@
                     }
                 }
             });
-            if (!hasData) {
-                // Show fallback message
-                const chartContainer = document.querySelector('.chart-container');
-                let fallbackMsg = document.getElementById('modal-chart-fallback');
-                if (!fallbackMsg) {
-                    fallbackMsg = document.createElement('div');
-                    fallbackMsg.id = 'modal-chart-fallback';
-                    fallbackMsg.style.position = 'absolute';
-                    fallbackMsg.style.top = '50%';
-                    fallbackMsg.style.left = '50%';
-                    fallbackMsg.style.transform = 'translate(-50%, -50%)';
-                    fallbackMsg.style.color = '#b0b0b0';
-                    fallbackMsg.style.fontSize = '1.1em';
-                    fallbackMsg.style.textAlign = 'center';
-                    fallbackMsg.style.pointerEvents = 'none';
-                    chartContainer.appendChild(fallbackMsg);
-                }
-                fallbackMsg.textContent = 'No historical data available. Showing current price.';
-            } else {
-                const fallbackMsg = document.getElementById('modal-chart-fallback');
-                if (fallbackMsg) fallbackMsg.remove();
-            }
         }
-        // === END: TESTABLE GRAPH FALLBACK ===
 
         async function searchCryptos() {
             const searchTerm = document.getElementById('crypto-search').value.toLowerCase();
